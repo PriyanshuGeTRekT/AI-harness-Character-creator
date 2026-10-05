@@ -67,6 +67,7 @@ function mcpDialog(x, data, existing, existingScope, seed) {
   const initial = JSON.stringify(d);
   let scope = existingScope || (state.scope && x.mcp.project ? 'project' : 'global');
   let reveal = false;
+  let template = 0;
   const attach = new Set(seed ? [] : [x.id]);
   const others = existing ? [] : state.scan.harnesses.filter(o => (seed || o.id !== x.id) && o.mcp);
   const body = h('div', {});
@@ -80,7 +81,7 @@ function mcpDialog(x, data, existing, existingScope, seed) {
     const stdio = d.transport === 'stdio';
     body.replaceChildren(...[
       from ? null : h('div', { class: 'grid2' },
-        field('Start from a template', h('select', { onchange: e => { Object.assign(d, { command: '', args: '', url: '' }, TEMPLATES[Number(e.target.value)]); delete d.label; draw(); } }, TEMPLATES.map((t, i) => h('option', { value: i }, t.label)))),
+        field('Start from a template', h('select', { onchange: e => { template = Number(e.target.value); Object.assign(d, { command: '', args: '', url: '' }, TEMPLATES[template]); delete d.label; draw(); } }, TEMPLATES.map((t, i) => h('option', { value: i, selected: i === template }, t.label)))),
         field('Or paste a config', h('button', { onclick: () => {
           const area = h('textarea', { rows: 9, placeholder: '{ "mcpServers": { "name": { "command": "npx", "args": ["..."] } } }' });
           modal('Paste an MCP server config', area, [{ label: 'Cancel' }, { label: 'Use it', class: 'primary', action: () => { Object.assign(d, parsePasted(area.value)); reveal = true; draw(); } }], { narrow: true });

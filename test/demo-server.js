@@ -41,4 +41,4 @@ write('.gemini/trustedFolders.json', JSON.stringify({ [projects[0]]: 'TRUST_FOLD
 write('.cursor/mcp.json', JSON.stringify({ mcpServers: {} }, null, 2));
 
 const port = Number(process.argv[2]) || Number(process.env.AGENTDECK_PORT) || undefined;
-require('../server.js').start({ port }).then(s => console.log(`Demo AgentDeck at ${s.address || s.existing}\nFake home: ${H}`));
+require('../server.js').start({ port }).then(s => console.log(`Demo AgentDeck: ${s.url}\nFake home: ${H}`));

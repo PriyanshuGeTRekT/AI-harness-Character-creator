@@ -186,4 +186,32 @@ test('presets: save, export, import (only known levers survive)', () => {
   assert.throws(() => c.importBundle({ bundle: { presets: { x: { bogus: 1 } } } }), /No presets/);
 });
 
+test('review regressions: descriptions, line endings, TOML comments, table keys', () => {
+  // a plain multi-line description cannot be shown in the form, and must survive an edit
+  const original = '---\nname: wrapped\ndescription: Reviews code\n  across two lines\ntools: [Read]\n---\n\nbody\n';
+  write('.claude/agents/wrapped.md', original);
+  const it = c.listItems({ harness: 'claude', project: '' }).agents.find(a => a.name === 'wrapped');
+  assert(it.description === '' && it.complex.includes('description'));
+  c.saveItem({ type: 'agents', path: it.path, name: it.name, description: it.description, body: 'new body', fields: it.fields });
+  assert.strictEqual(read('.claude/agents/wrapped.md'), original.replace('body\n', 'new body\n'));
+
+  // a CRLF instruction file is still "in sync" after applying
+  write('.gemini/GEMINI.md', '# Mine\r\n\r\n- keep\r\n');
+  c.applyProfile({ harness: 'gemini', project: '', values: { verbosity: 'terse', readFirst: true } });
+  assert(!/[^\r]\n/.test(read('.gemini/GEMINI.md')));
+  assert.strictEqual(c.getProfile({ harness: 'gemini', project: '' }).status, 'synced');
+
+  // editing a TOML item keeps its comments and string style
+  const cmd = "# my favourite command\ndescription = 'Explain it'\nprompt = '''\nExplain {{args}} using C:\\paths\n'''\n";
+  write('.gemini/commands/keep.toml', cmd);
+  const k = c.listItems({ harness: 'gemini', project: '' }).commands.find(x => x.name === 'keep');
+  c.saveItem({ type: 'commands', path: k.path, name: 'keep', description: 'Explain it well', body: k.body, fields: {} });
+  assert.strictEqual(read('.gemini/commands/keep.toml'), cmd.replace("'Explain it'", '"Explain it well"'));
+
+  // a scalar must not be written next to a table of the same name
+  write('.codex/config.toml', 'model = "x"\n\n[approval_policy.granular]\nrules = true\n');
+  assert.throws(() => c.planProfile({ harness: 'codex', project: '', native: { approval_policy: 'never' } }), /is a table/);
+  assert.strictEqual(c.planProfile({ harness: 'codex', project: '', native: { model: 'y' } }).changes.length, 1);
+});
+
 done('engine');

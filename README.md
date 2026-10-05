@@ -125,7 +125,9 @@ It only writes into project folders a harness has already worked in, or ones you
 
 ## Security
 
-AgentDeck is a local web server bound to `127.0.0.1`. Each run generates a random token that the page must send with every request, the `Host` header is checked to stop DNS-rebinding, and a content security policy blocks anything not served by the app itself. It makes no network requests. MCP secrets you enter are stored where the harness expects them, in plain text, which is how those tools work; the health check flags them.
+AgentDeck is a local web server bound to `127.0.0.1`. Each run generates a random session key that every request must carry. The key is handed only to the window AgentDeck opens (and kept in a file only your user can read, so a second launch can reopen a running copy); it is never served over HTTP, so another user on the same machine cannot fetch it. The `Host` header is checked to stop DNS-rebinding, and a content security policy blocks anything not served by the app itself. It makes no network requests.
+
+MCP secrets you enter are stored where the harness expects them, in plain text, which is how those tools work; the health check flags them. The destructive-command hook recipe is a safety net against mistakes, not a sandbox: keep your harness's own sandbox and approval settings on.
 
 ## Uninstall
 
@@ -134,7 +136,7 @@ Delete the `~/.agentdeck` folder (presets, history, backups, hook scripts) and r
 ## Development
 
 ```bash
-npm test          # 58 tests, each file against its own throwaway home folder
+npm test          # 65 tests, each file against its own throwaway home folder
 npm run demo      # the UI on sample data, without touching your real config
 npm run docs      # regenerate the harness table above from the code
 ```

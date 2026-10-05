@@ -29,7 +29,7 @@ function call(port, method, url, { headers = {}, body } = {}) {
     const r = await call(port, 'GET', '/');
     assert.strictEqual(r.status, 200);
     assert(r.headers['content-type'].startsWith('text/html'));
-    assert(r.text.includes(ctx.token) && !r.text.includes('__AGENTDECK_TOKEN__'));
+    assert(!r.text.includes(ctx.token), 'the session key must never be served: any local user could fetch it');
     assert(r.headers['content-security-policy'].includes("script-src 'self'") && r.headers['x-frame-options'] === 'DENY');
     assert.strictEqual((await call(port, 'GET', '/js/app.js')).headers['content-type'], 'text/javascript; charset=utf-8');
     assert.strictEqual((await call(port, 'GET', '/favicon.svg')).status, 200);
@@ -45,6 +45,8 @@ function call(port, method, url, { headers = {}, body } = {}) {
     assert.strictEqual((await call(port, 'GET', '/', { headers: { host: 'evil.example' } })).status, 403);
     assert.strictEqual((await call(port, 'GET', '/api/scan')).status, 401);
     assert.strictEqual((await call(port, 'GET', '/api/scan', { headers: { 'x-agentdeck-token': 'x'.repeat(48) } })).status, 401);
+    assert.strictEqual((await call(port, 'GET', '/api/scan', { headers: { 'x-agentdeck-token': Buffer.from('\u00e9'.repeat(48), 'utf8').toString('latin1') } })).status, 401);
+    assert.strictEqual((await call(port, 'GET', '/api/ping')).status, 200, 'the server survived a malformed key');
     assert.strictEqual((await call(port, 'GET', '/api/nope', { headers: auth })).status, 404);
     assert.deepStrictEqual((await call(port, 'GET', '/api/ping')).json.app, 'agentdeck');
   });
@@ -75,6 +77,12 @@ function call(port, method, url, { headers = {}, body } = {}) {
 
   await testAsync('ports: a second copy finds the first; a foreign program is stepped over', async () => {
     assert.strictEqual((await start({ port })).existing, `http://127.0.0.1:${port}`);
+    // A launched copy leaves a per-user session file, so a second launch gets a keyed URL.
+    const first = await start({ port: port + 300, persist: true });
+    assert.strictEqual(first.url, `http://127.0.0.1:${port + 300}/?k=${first.ctx.token}`);
+    assert.strictEqual((await start({ port: port + 300 })).url, first.url);
+    assert.strictEqual((await call(port + 300, 'GET', '/api/scan', { headers: { 'x-agentdeck-token': first.ctx.token } })).status, 200);
+    first.server.close();
     const foreign = http.createServer((req, res) => res.end('not agentdeck')).listen(47190, '127.0.0.1');
     await new Promise(r => foreign.once('listening', r));
     const next = await start({ port: 47190 });
@@ -92,6 +100,7 @@ function call(port, method, url, { headers = {}, body } = {}) {
     assert.strictEqual(run('--version').stdout.trim(), require('../package.json').version);
     assert.strictEqual(run('frobnicate').status, 2);
     assert.strictEqual(run('--port', 'abc', '--no-open').status, 2);
+    assert(run('--port', '5000', '--version').status === 0, '--port takes a value; it is not a command');
     assert(run('--help').stdout.includes('agentdeck doctor'));
   });
 

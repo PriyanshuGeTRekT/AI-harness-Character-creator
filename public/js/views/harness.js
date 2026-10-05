@@ -11,8 +11,9 @@ import { projectsTab, filesTab } from './projects.js';
 // Behavior and Settings share one draft per harness and scope, so switching between the
 // two tabs (or away and back) never loses unsaved edits.
 export async function loadDraft(x) {
+  const key = draftKey(x.id, state.scope);
   const profile = await api('GET', `/api/profile?harness=${encodeURIComponent(x.id)}&project=${encodeURIComponent(state.scope)}`);
-  const d = state.drafts[draftKey()] || (state.drafts[draftKey()] = {});
+  const d = state.drafts[key] || (state.drafts[key] = {});
   const baseValues = { ...state.catalog.defaults, ...profile.values };
   const baseNative = Object.fromEntries(profile.native.map(n => [n.key, n.kind === 'list' ? n.value.join('\n') : (n.value ?? '')]));
   if (!d.values || same(d.values, d.baseValues)) d.values = { ...baseValues };

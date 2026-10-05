@@ -87,15 +87,13 @@ function readBody(req) {
   });
 }
 
-function serveStatic(res, urlPath, token) {
+function serveStatic(res, urlPath) {
   const rel = urlPath === '/' ? 'index.html' : urlPath.replace(/^\/+/, '');
   const file = path.join(PUBLIC, rel);
   if (!file.startsWith(PUBLIC + path.sep) || rel.includes('\0')) return send(res, 403, 'Forbidden', 'text/plain');
   fs.readFile(file, (err, buf) => {
     if (err) return send(res, 404, 'Not found', 'text/plain');
-    let out = buf;
-    if (rel === 'index.html') out = buf.toString('utf8').replace('__AGENTDECK_TOKEN__', token);
-    send(res, 200, out, MIME[path.extname(file)] || 'application/octet-stream');
+    send(res, 200, buf, MIME[path.extname(file)] || 'application/octet-stream');
   });
 }
 
@@ -111,12 +109,14 @@ function createServer(ctx) {
     if (url.pathname === '/api/ping') return send(res, 200, { app: 'agentdeck', version: core.VERSION });
     if (!url.pathname.startsWith('/api/')) {
       if (req.method !== 'GET' && req.method !== 'HEAD') return send(res, 405, 'Method not allowed', 'text/plain');
-      return serveStatic(res, url.pathname, ctx.token);
+      return serveStatic(res, url.pathname);
     }
 
-    const given = String(req.headers['x-agentdeck-token'] || '');
-    const ok = given.length === ctx.token.length && crypto.timingSafeEqual(Buffer.from(given), Buffer.from(ctx.token));
-    if (!ok) return send(res, 401, { error: 'Missing or stale session token. Reload the page.' });
+    // Hash both sides so the comparison is constant-time whatever bytes were sent.
+    const digest = v => crypto.createHash('sha256').update(String(v)).digest();
+    if (!crypto.timingSafeEqual(digest(req.headers['x-agentdeck-token'] || ''), digest(ctx.token))) {
+      return send(res, 401, { error: 'This page has no valid session key. Open AgentDeck from its launcher, or run "agentdeck" again.' });
+    }
     if (req.method === 'POST' && url.pathname === '/api/alive') { ctx.lastBeat = Date.now(); return send(res, 200, { ok: true }); }
     if (req.method === 'POST' && url.pathname === '/api/quit') { send(res, 200, { ok: true }); setTimeout(() => process.exit(0), 150); return; }
     const handler = routes[`${req.method} ${url.pathname}`];
@@ -176,20 +176,39 @@ function ping(port) {
 
 // ---- start ----------------------------------------------------------------------
 
+// The session key is never served over HTTP (any local user could fetch it). It is passed
+// to the window we open, and kept in a file only this user can read so that launching
+// AgentDeck again can reopen the copy that is already running.
+const SESSION_FILE = path.join(os.homedir(), '.agentdeck', 'session.json');
+const keyed = (address, token) => `${address}/?k=${token}`;
+
+function saveSession(ctx) {
+  try {
+    fs.mkdirSync(path.dirname(SESSION_FILE), { recursive: true });
+    fs.writeFileSync(SESSION_FILE, JSON.stringify({ port: ctx.port, token: ctx.token, pid: process.pid }), { mode: 0o600 });
+    process.on('exit', () => { try { if (JSON.parse(fs.readFileSync(SESSION_FILE, 'utf8')).pid === process.pid) fs.unlinkSync(SESSION_FILE); } catch { /* already gone */ } });
+    for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => process.exit(0));
+  } catch { /* a second launch will just start its own copy */ }
+}
+
+function runningSession(port) {
+  try { const s = JSON.parse(fs.readFileSync(SESSION_FILE, 'utf8')); return s.port === port && typeof s.token === 'string' ? s.token : null; } catch { return null; }
+}
+
 // Listens on the first free port from `port` upward. If an AgentDeck is already running
 // on one of them, resolves with { existing: address } instead of starting a second copy.
-function start({ port = DEFAULT_PORT, fixed = false } = {}) {
+function start({ port = DEFAULT_PORT, fixed = false, persist = false } = {}) {
   return new Promise((resolve, reject) => {
     const attempt = n => {
       const ctx = { port: n, token: crypto.randomBytes(24).toString('hex'), lastBeat: 0 };
       const server = createServer(ctx);
       server.once('error', async err => {
         if (err.code !== 'EADDRINUSE') return reject(err);
-        if (await ping(n)) return resolve({ existing: `http://${HOST}:${n}` });
+        if (await ping(n)) { const token = runningSession(n); return resolve({ existing: `http://${HOST}:${n}`, url: token ? keyed(`http://${HOST}:${n}`, token) : `http://${HOST}:${n}` }); }
         if (fixed || n >= port + 20) return reject(Object.assign(new Error(`Port ${n} is in use by another program. Pick another with --port.`), { code: 'EADDRINUSE' }));
         attempt(n + 1);
       });
-      server.listen(n, HOST, () => resolve({ server, ctx, address: `http://${HOST}:${n}` }));
+      server.listen(n, HOST, () => { if (persist) saveSession(ctx); resolve({ server, ctx, address: `http://${HOST}:${n}`, url: keyed(`http://${HOST}:${n}`, ctx.token) }); });
     };
     attempt(port);
   });
@@ -206,14 +225,14 @@ async function main(argv) {
   const mode = argv.includes('--no-open') ? 'none' : argv.includes('--browser') ? 'tab' : 'window';
 
   let started;
-  try { started = await start({ port, fixed: wanted != null && wanted !== '' }); }
+  try { started = await start({ port, fixed: wanted != null && wanted !== '', persist: true }); }
   catch (e) { console.error(e.message); process.exit(1); }
 
-  const address = started.existing || started.address;
-  if (started.existing) console.log(`AgentDeck is already running at ${address}. Opening it.`);
-  else console.log(`AgentDeck ${core.VERSION} running at ${address}  (Ctrl+C to stop)`);
+  const address = started.url;
+  if (started.existing) console.log(`AgentDeck is already running at ${started.existing}. Opening it.`);
+  else console.log(`AgentDeck ${core.VERSION} running at ${started.address}  (Ctrl+C to stop)`);
 
-  if (mode === 'none') return;
+  if (mode === 'none') { console.log(`Open ${address}`); return; }
   const done = () => process.exit(0);
   if (mode === 'window' && openWindow(address, started.existing ? done : done)) return;
   if (mode === 'window') console.log('No Chrome, Edge, Brave or Chromium was found for a standalone window, so AgentDeck opened in your default browser. Close the tab to stop it.');

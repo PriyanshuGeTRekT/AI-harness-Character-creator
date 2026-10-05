@@ -50,5 +50,5 @@ async function fileDialog(f) {
   modal(f.label, h('div', {}, h('div', { class: 'path', style: 'margin-bottom:8px' }, f.path + (data.exists ? '' : '  (does not exist yet)')), area), [
     { label: 'Close' },
     { label: 'Review changes', class: 'primary', action: () => reviewFrom(`Save ${f.label}`, '/api/file/preview', '/api/file', { path: f.path, content: area.value }) },
-  ], { guard: () => area.value !== (data.content || '') });
+  ], { guard: () => area.value !== (data.content || '').replace(/\r\n/g, '\n') });
 }

@@ -104,4 +104,18 @@ test('top-level get/set: values, multi-line values, CRLF, unset', () => {
   assert.strictEqual(t.setTopLevel('b = 1\n', 'a', []), 'b = 1\n');
 });
 
+test('removing a table leaves the rest of the file exactly as it was', () => {
+  const text = 'notes = """\nline one\n\n\n\nline two\n"""\n\n\n\n# keep: about a\n[mcp_servers.a]\ncommand = "a"\n# trailing note inside a\n\n# keep: notes about b\n# second line about b\n[mcp_servers.b]\ncommand = "b"\n';
+  const out = t.removeTable(text, ['mcp_servers', 'a']);
+  // the string's own blank lines and b's comments stay; a's comment goes with a
+  assert.strictEqual(out, 'notes = """\nline one\n\n\n\nline two\n"""\n\n# keep: notes about b\n# second line about b\n[mcp_servers.b]\ncommand = "b"\n');
+  assert.strictEqual(t.removeTable(text, ['mcp_servers', 'b']), text.slice(0, text.indexOf('# keep: notes about b')).replace(/\n+$/, '\n'));
+  // an inert comment line that merely looks like a header is not one
+  assert.strictEqual(t.removeTable('a = 1\n# [mcp_servers.x]\nb = 2\n', ['mcp_servers', 'x']), 'a = 1\n# [mcp_servers.x]\nb = 2\n');
+  assert.strictEqual(t.removeTable(text, ['nope']), text);
+  // set then remove returns to the start
+  const base = 'model = "x"\n\n[a]\nk = 1\n';
+  assert.strictEqual(t.removeTable(t.setTable(base, ['mcp_servers', 'z'], { command: 'c' }), ['mcp_servers', 'z']), base);
+});
+
 done('toml');

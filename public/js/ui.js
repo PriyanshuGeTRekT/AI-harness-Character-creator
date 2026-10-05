@@ -1,6 +1,13 @@
 // Shared UI pieces: element builder, API client, toasts, modals, diff view, formatters.
 
-const TOKEN = document.querySelector('meta[name="agentdeck-token"]').content;
+// The session key arrives once in the URL from the launcher. It is kept for this tab only
+// and removed from the address bar, so it does not end up in history or screenshots.
+const TOKEN = (() => {
+  const fromUrl = new URLSearchParams(location.search).get('k');
+  const keep = { get: () => { try { return sessionStorage.getItem('agentdeck-key'); } catch { return null; } }, set: v => { try { sessionStorage.setItem('agentdeck-key', v); } catch { /* private mode */ } } };
+  if (fromUrl) { keep.set(fromUrl); history.replaceState(null, '', location.pathname + location.hash); }
+  return fromUrl || keep.get() || '';
+})();
 
 export function h(tag, attrs, ...kids) {
   const el = document.createElement(tag);
@@ -180,7 +187,12 @@ export function diffView(before, after) {
 export const changed = () => window.dispatchEvent(new Event('agentdeck:changed'));
 
 export async function undo(batch) {
-  try { await api('POST', '/api/undo', { batch }); toast('Undone.'); changed(); } catch (e) { fail(e); }
+  try {
+    const r = await api('POST', '/api/undo', { batch });
+    const kept = (r.results || []).filter(x => x.skipped);
+    toast(kept.length ? `Undone, except ${kept.map(x => baseName(x.path)).join(', ')}: changed since, so left alone.` : 'Undone.');
+    changed();
+  } catch (e) { fail(e); }
 }
 
 // Shows what would be written, and writes it only on confirmation. Resolves to the apply
@@ -188,7 +200,8 @@ export async function undo(batch) {
 // preview itself is rejected, so the calling dialog can show the reason and stay open.
 export async function confirmChanges(title, previewUrl, applyUrl, payload, { applyLabel } = {}) {
   const plan = await api('POST', previewUrl, payload);
-  const changes = (plan.changes || []).filter(c => c.removed || c.before !== c.after);
+  const lf = t => (t == null ? t : t.replace(/\r\n/g, '\n'));
+  const changes = (plan.changes || []).filter(c => c.removed || lf(c.before) !== lf(c.after));
   if (!changes.length) { toast((plan.warnings || [])[0] || 'Nothing to change: the files already match.'); return null; }
   return new Promise(resolve => {
     let result = null;

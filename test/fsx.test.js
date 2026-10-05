@@ -112,4 +112,27 @@ test('state: defaults, damaged file is set aside not overwritten', () => {
   assert.deepStrictEqual([s.profiles, s.presets], [{}, { a: {} }]);
 });
 
+test('managed block: a stray start marker never swallows user text', () => {
+  const stray = `intro\n\n${f.BLOCK_START}\nhalf a block, never closed\n\nUSER TEXT I WROTE\n`;
+  const once = f.setBlock(stray, 'RULE ONE');
+  const twice = f.setBlock(once, 'RULE TWO');
+  assert(twice.includes('USER TEXT I WROTE') && twice.includes('half a block') && twice.includes('RULE TWO') && !twice.includes('RULE ONE'));
+  assert.strictEqual(f.getBlock(twice), 'RULE TWO');
+  assert.strictEqual(f.getBlock(`x\r\n${f.BLOCK_START}\r\n- a\r\n- b\r\n${f.BLOCK_END}\r\n`), '- a\n- b');
+});
+
+test('undo leaves a created file alone once something else was added to it', () => {
+  const file = home.p('u', 'settings.json');
+  const made = f.withBatch('create', () => ({ results: [f.writeSafe(file, '{"a":1}\n')] }));
+  f.writeSafe(file, '{"a":1,"b":2}\n');
+  const r = f.undoBatch(made.batch);
+  assert(r.results[0].skipped && fs.readFileSync(file, 'utf8') === '{"a":1,"b":2}\n');
+});
+
+test('frontmatter: a file without frontmatter does not gain an empty block', () => {
+  const p = f.parseFrontmatter('Just a prompt.\n');
+  assert.strictEqual(f.buildFrontmatter({}, p.body, p), 'Just a prompt.\n');
+  assert.strictEqual(f.buildFrontmatter({ description: 'd' }, p.body, p), '---\ndescription: d\n---\n\nJust a prompt.\n');
+});
+
 done('fsx');

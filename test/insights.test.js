@@ -75,7 +75,7 @@ test('drift: same, differs, edited by hand', () => {
 
 test('health: finds real problems, scores them, and findings can be dismissed', () => {
   write('.claude/settings.json', JSON.stringify({ permissions: { defaultMode: 'bypassPermissions' } }));
-  write('.gemini/settings.json', '{ "broken": ');
+  write('.gemini/settings.json', '{ "$schema": "https://example.com/schema.json", "broken": ');
   x.applyMcp({ harness: 'claude', scope: 'project', project: P, name: 'db', server: { transport: 'stdio', command: 'npx', args: [], env: { DB_PASSWORD: 'hunter2hunter2' } } });
   x.applyHook({ harness: 'claude', scope: 'global', hook: { event: 'Stop', matcher: '', command: `node "${home.p('.agentdeck/hooks/gone.js').replace(/\\/g, '/')}"`, timeout: '' } });
   const h = ins.health();
