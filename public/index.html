@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AgentDeck</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="app">
+  <aside id="sidebar">
+    <div class="brand">
+      <div class="logo">AD</div>
+      <div>
+        <div class="brand-name">AgentDeck</div>
+        <div class="brand-sub">Agent harness control panel</div>
+      </div>
+    </div>
+    <div id="harness-list"></div>
+    <div class="sidebar-foot">
+      <button class="ghost" id="btn-rescan">Rescan</button>
+      <button class="ghost" id="btn-backups">Backups</button>
+    </div>
+  </aside>
+  <main id="main"><div class="empty">Scanning this machine…</div></main>
+</div>
+<div id="modal-root"></div>
+<div id="toast-root"></div>
+<script>window.AGENTDECK_TOKEN = '__AGENTDECK_TOKEN__';</script>
+<script src="app.js"></script>
+</body>
+</html>
