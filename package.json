@@ -1,17 +1,21 @@
 {
   "name": "agentdeck",
-  "version": "0.1.0",
-  "description": "Local control panel for AI coding-agent harnesses",
-  "private": true,
-  "bin": {
-    "agentdeck": "server.js"
-  },
+  "version": "1.0.0",
+  "description": "One control panel for every AI coding agent on your machine: tune behavior, settings, permissions, skills, MCP servers and hooks for Claude Code, Codex, Gemini CLI, Cursor and 17 more. Local, zero dependencies.",
+  "keywords": ["claude-code", "codex", "gemini-cli", "cursor", "opencode", "ai-agents", "coding-agent", "agents-md", "claude-md", "mcp", "hooks", "skills", "token-usage", "developer-tools"],
+  "homepage": "https://github.com/PriyanshuGeTRekT/agentdeck#readme",
+  "bugs": "https://github.com/PriyanshuGeTRekT/agentdeck/issues",
+  "repository": { "type": "git", "url": "git+https://github.com/PriyanshuGeTRekT/agentdeck.git" },
+  "license": "MIT",
+  "author": "Priyanshu",
+  "main": "lib/core.js",
+  "bin": { "agentdeck": "server.js" },
+  "files": ["server.js", "lib/", "public/", "README.md", "LICENSE", "CHANGELOG.md"],
   "scripts": {
-    "start": "node server.js --window",
-    "test": "node test/toml.test.js && node test/engine.test.js && node test/extras.test.js"
+    "start": "node server.js",
+    "demo": "node test/demo-server.js",
+    "test": "node test/run.js",
+    "docs": "node scripts/matrix.js"
   },
-  "engines": {
-    "node": ">=18"
-  },
-  "license": "MIT"
+  "engines": { "node": ">=18" }
 }

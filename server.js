@@ -7,17 +7,23 @@ const crypto = require('crypto');
 const { exec, spawn } = require('child_process');
 const os = require('os');
 const core = require('./lib/core');
+const integrations = require('./lib/integrations');
+const insights = require('./lib/insights');
 
-const PORT = Number(process.env.AGENTDECK_PORT) || 4317;
 const HOST = '127.0.0.1';
+const DEFAULT_PORT = 4517;
 const PUBLIC = path.join(__dirname, 'public');
-// Per-run token: the page gets it inlined, so other sites/processes can't drive the API.
-const TOKEN = crypto.randomBytes(24).toString('hex');
-
-const MIME = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.json': 'application/json' };
+const MIME = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.json': 'application/json', '.ico': 'image/x-icon', '.png': 'image/png' };
+const CSP = "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
 
 const routes = {
   'GET /api/scan': () => core.scan(),
+  'GET /api/overview': () => insights.overview(),
+  'GET /api/usage': q => insights.usage(q),
+  'GET /api/health': () => insights.health(),
+  'POST /api/health/dismiss': (q, body) => insights.dismissFinding(body),
+  'GET /api/drift': () => insights.drift(),
+  'GET /api/context': q => insights.contextStack(q),
   'GET /api/levers': () => core.leverCatalog(),
   'GET /api/profile': q => core.getProfile(q),
   'POST /api/profile/preview': (q, body) => core.planProfile(body),
@@ -26,122 +32,199 @@ const routes = {
   'POST /api/items/preview': (q, body) => core.planItem(body),
   'POST /api/items': (q, body) => core.saveItem(body),
   'POST /api/items/delete': (q, body) => core.deleteItem(body),
-  'GET /api/mcp': q => core.listMcp(q),
-  'POST /api/mcp/preview': (q, body) => core.planMcp(body),
-  'POST /api/mcp': (q, body) => core.applyMcp(body),
-  'GET /api/hooks': q => core.listHooks(q),
-  'POST /api/hooks/preview': (q, body) => core.planHook(body),
-  'POST /api/hooks': (q, body) => core.applyHook(body),
+  'GET /api/mcp': q => integrations.listMcp(q),
+  'POST /api/mcp/preview': (q, body) => integrations.planMcp(body),
+  'POST /api/mcp': (q, body) => integrations.applyMcp(body),
+  'GET /api/hooks': q => integrations.listHooks(q),
+  'POST /api/hooks/preview': (q, body) => integrations.planHook(body),
+  'POST /api/hooks': (q, body) => integrations.applyHook(body),
   'POST /api/projects/add': (q, body) => core.addProject(body),
   'POST /api/projects/remove': (q, body) => core.removeProject(body),
   'GET /api/file': q => core.readFile(q),
+  'POST /api/file/preview': (q, body) => core.planFile(body),
   'POST /api/file': (q, body) => core.writeFile(body),
   'GET /api/backups': () => core.listBackups(),
+  'POST /api/backups/preview': (q, body) => core.planRestore(body),
   'POST /api/backups/restore': (q, body) => core.restoreBackup(body),
+  'POST /api/undo': (q, body) => core.undo(body),
   'GET /api/presets': () => core.listPresets(),
   'POST /api/presets': (q, body) => core.savePreset(body),
   'POST /api/presets/delete': (q, body) => core.deletePreset(body),
+  'GET /api/export': () => core.exportBundle(),
+  'POST /api/import': (q, body) => core.importBundle(body),
 };
 
 function send(res, status, data, type = 'application/json') {
   const payload = type === 'application/json' ? JSON.stringify(data) : data;
-  res.writeHead(status, { 'Content-Type': `${type}; charset=utf-8`, 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' });
+  res.writeHead(status, {
+    'Content-Type': `${type}; charset=utf-8`, 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff',
+    'X-Frame-Options': 'DENY', 'Referrer-Policy': 'no-referrer', 'Content-Security-Policy': CSP,
+  });
   res.end(payload);
 }
+
+const httpError = (message, status) => Object.assign(new Error(message), { status });
 
 function readBody(req) {
   return new Promise((resolve, reject) => {
     let size = 0;
+    let over = false;
     const chunks = [];
     req.on('data', c => {
+      if (over) return; // keep draining so the client can read the 413 instead of a reset
       size += c.length;
-      if (size > 5e6) { reject(new Error('Request too large')); req.destroy(); return; }
+      if (size > 5e6) { over = true; chunks.length = 0; reject(httpError('Request too large.', 413)); return; }
       chunks.push(c);
     });
     req.on('end', () => {
       if (!chunks.length) return resolve({});
-      try { resolve(JSON.parse(Buffer.concat(chunks).toString('utf8'))); } catch { reject(new Error('Invalid JSON body')); }
+      let body;
+      try { body = JSON.parse(Buffer.concat(chunks).toString('utf8')); } catch { return reject(httpError('Invalid JSON body.', 400)); }
+      if (!body || typeof body !== 'object' || Array.isArray(body)) return reject(httpError('The request body must be a JSON object.', 400));
+      resolve(body);
     });
     req.on('error', reject);
   });
 }
 
-function serveStatic(res, urlPath) {
+function serveStatic(res, urlPath, token) {
   const rel = urlPath === '/' ? 'index.html' : urlPath.replace(/^\/+/, '');
   const file = path.join(PUBLIC, rel);
-  if (!file.startsWith(PUBLIC + path.sep)) return send(res, 403, 'Forbidden', 'text/plain');
+  if (!file.startsWith(PUBLIC + path.sep) || rel.includes('\0')) return send(res, 403, 'Forbidden', 'text/plain');
   fs.readFile(file, (err, buf) => {
     if (err) return send(res, 404, 'Not found', 'text/plain');
-    const ext = path.extname(file);
     let out = buf;
-    if (rel === 'index.html') out = buf.toString('utf8').replace('__AGENTDECK_TOKEN__', TOKEN);
-    send(res, 200, out, MIME[ext] || 'application/octet-stream');
+    if (rel === 'index.html') out = buf.toString('utf8').replace('__AGENTDECK_TOKEN__', token);
+    send(res, 200, out, MIME[path.extname(file)] || 'application/octet-stream');
   });
 }
 
-const server = http.createServer(async (req, res) => {
-  // Reject DNS-rebinding and cross-origin callers: only our own host may talk to us.
-  const host = (req.headers.host || '').toLowerCase();
-  if (host !== `${HOST}:${PORT}` && host !== `localhost:${PORT}`) return send(res, 403, { error: 'Bad host' });
+function createServer(ctx) {
+  return http.createServer(async (req, res) => {
+    // Reject DNS-rebinding and cross-origin callers: only our own host may talk to us.
+    const host = (req.headers.host || '').toLowerCase();
+    if (host !== `${HOST}:${ctx.port}` && host !== `localhost:${ctx.port}`) return send(res, 403, { error: 'Bad host' });
+    let url;
+    try { url = new URL(req.url, `http://${host}`); } catch { return send(res, 400, { error: 'Bad URL' }); }
 
-  const url = new URL(req.url, `http://${host}`);
-  if (!url.pathname.startsWith('/api/')) {
-    if (req.method !== 'GET') return send(res, 405, 'Method not allowed', 'text/plain');
-    return serveStatic(res, url.pathname);
-  }
+    // Lets a second launch recognise an AgentDeck that is already running.
+    if (url.pathname === '/api/ping') return send(res, 200, { app: 'agentdeck', version: core.VERSION });
+    if (!url.pathname.startsWith('/api/')) {
+      if (req.method !== 'GET' && req.method !== 'HEAD') return send(res, 405, 'Method not allowed', 'text/plain');
+      return serveStatic(res, url.pathname, ctx.token);
+    }
 
-  if (req.headers['x-agentdeck-token'] !== TOKEN) return send(res, 401, { error: 'Missing or stale session token. Reload the page.' });
-  const handler = routes[`${req.method} ${url.pathname}`];
-  if (!handler) return send(res, 404, { error: 'Unknown endpoint' });
+    const given = String(req.headers['x-agentdeck-token'] || '');
+    const ok = given.length === ctx.token.length && crypto.timingSafeEqual(Buffer.from(given), Buffer.from(ctx.token));
+    if (!ok) return send(res, 401, { error: 'Missing or stale session token. Reload the page.' });
+    if (req.method === 'POST' && url.pathname === '/api/alive') { ctx.lastBeat = Date.now(); return send(res, 200, { ok: true }); }
+    if (req.method === 'POST' && url.pathname === '/api/quit') { send(res, 200, { ok: true }); setTimeout(() => process.exit(0), 150); return; }
+    const handler = routes[`${req.method} ${url.pathname}`];
+    if (!handler) return send(res, 404, { error: 'Unknown endpoint' });
 
-  try {
-    const body = req.method === 'POST' ? await readBody(req) : {};
-    const result = await handler(Object.fromEntries(url.searchParams), body);
-    send(res, 200, result);
-  } catch (err) {
-    send(res, err.status || 500, { error: err.message });
-  }
-});
-
-const ADDRESS = `http://${HOST}:${PORT}`;
-const WINDOW = process.argv.includes('--window');
-
-// --window: show the UI in its own chromeless Edge/Chrome window (app mode) with a private
-// browser profile, so the window is a separate process and closing it stops AgentDeck.
-function findBrowser() {
-  const roots = [process.env['ProgramFiles(x86)'], process.env.ProgramFiles, process.env.LOCALAPPDATA].filter(Boolean);
-  const rels = ['Microsoft\\Edge\\Application\\msedge.exe', 'Google\\Chrome\\Application\\chrome.exe'];
-  const candidates = process.platform === 'win32' ? rels.flatMap(rel => roots.map(root => path.join(root, rel)))
-    : process.platform === 'darwin' ? ['/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', '/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge']
-    : ['/usr/bin/google-chrome', '/usr/bin/chromium', '/usr/bin/chromium-browser', '/usr/bin/microsoft-edge'];
-  return candidates.find(p => fs.existsSync(p)) || null;
+    try {
+      const body = req.method === 'POST' ? await readBody(req) : {};
+      send(res, 200, await handler(Object.fromEntries(url.searchParams), body));
+    } catch (err) {
+      const status = Number.isInteger(err.status) ? err.status : 500;
+      if (status === 500) console.error(err);
+      send(res, status, { error: status === 500 ? `Unexpected error: ${err.message}` : err.message });
+    }
+  });
 }
 
-function openBrowserTab() {
-  const opener = process.platform === 'win32' ? `start "" "${ADDRESS}"` : process.platform === 'darwin' ? `open "${ADDRESS}"` : `xdg-open "${ADDRESS}"`;
+// ---- opening a window ------------------------------------------------------------
+
+function findBrowser() {
+  const home = os.homedir();
+  const win = [process.env['ProgramFiles(x86)'], process.env.ProgramFiles, process.env.LOCALAPPDATA].filter(Boolean)
+    .flatMap(root => ['Microsoft\\Edge\\Application\\msedge.exe', 'Google\\Chrome\\Application\\chrome.exe', 'BraveSoftware\\Brave-Browser\\Application\\brave.exe', 'Chromium\\Application\\chrome.exe'].map(rel => path.join(root, rel)));
+  const mac = ['Google Chrome.app/Contents/MacOS/Google Chrome', 'Microsoft Edge.app/Contents/MacOS/Microsoft Edge', 'Brave Browser.app/Contents/MacOS/Brave Browser', 'Chromium.app/Contents/MacOS/Chromium']
+    .flatMap(app => [`/Applications/${app}`, path.join(home, 'Applications', app)]);
+  const linuxNames = ['google-chrome', 'google-chrome-stable', 'chromium', 'chromium-browser', 'microsoft-edge', 'microsoft-edge-stable', 'brave-browser'];
+  const linux = [...(process.env.PATH || '').split(path.delimiter).filter(Boolean), '/usr/bin', '/usr/local/bin', '/snap/bin', '/var/lib/flatpak/exports/bin'].flatMap(dir => linuxNames.map(n => path.join(dir, n)));
+  const candidates = process.platform === 'win32' ? win : process.platform === 'darwin' ? mac : linux;
+  return candidates.find(p => { try { return fs.statSync(p).isFile(); } catch { return false; } }) || null;
+}
+
+function openTab(address) {
+  const opener = process.platform === 'win32' ? `start "" "${address}"` : process.platform === 'darwin' ? `open "${address}"` : `xdg-open "${address}"`;
   exec(opener, () => {});
 }
 
-function openWindow(onClose) {
+// A chromeless Chromium window with its own profile is a separate process, so we can
+// tell when the user closes it. Returns false when no such browser is installed.
+function openWindow(address, onClose) {
   const browser = findBrowser();
-  if (!browser) { openBrowserTab(); return; }
+  if (!browser) return false;
   const profile = path.join(os.homedir(), '.agentdeck', 'window-profile');
-  const child = spawn(browser, [`--app=${ADDRESS}`, `--user-data-dir=${profile}`, '--window-size=1280,860', '--no-first-run', '--no-default-browser-check'], { stdio: 'ignore' });
-  child.on('error', openBrowserTab);
+  const child = spawn(browser, [`--app=${address}`, `--user-data-dir=${profile}`, '--window-size=1320,880', '--no-first-run', '--no-default-browser-check'], { stdio: 'ignore' });
+  child.on('error', () => openTab(address));
   if (onClose) child.on('exit', onClose);
+  return true;
 }
 
-server.on('error', err => {
-  if (err.code === 'EADDRINUSE') {
-    // Already running: just show its window again.
-    if (WINDOW) { openWindow(() => process.exit(0)); return; }
-    console.error(`Port ${PORT} is in use. Set AGENTDECK_PORT to another port, or close the other AgentDeck window.`);
-  } else console.error(err.message);
-  process.exit(1);
-});
+function ping(port) {
+  return new Promise(resolve => {
+    const req = http.get({ host: HOST, port, path: '/api/ping', timeout: 800 }, res => {
+      let s = '';
+      res.on('data', d => { s += d; }).on('end', () => { try { resolve(JSON.parse(s).app === 'agentdeck'); } catch { resolve(false); } });
+    });
+    req.on('error', () => resolve(false)).on('timeout', () => { req.destroy(); resolve(false); });
+  });
+}
 
-server.listen(PORT, HOST, () => {
-  console.log(`AgentDeck running at ${ADDRESS}  (Ctrl+C to stop)`);
-  if (WINDOW) openWindow(() => process.exit(0));
-  else if (!process.argv.includes('--no-open')) openBrowserTab();
-});
+// ---- start ----------------------------------------------------------------------
+
+// Listens on the first free port from `port` upward. If an AgentDeck is already running
+// on one of them, resolves with { existing: address } instead of starting a second copy.
+function start({ port = DEFAULT_PORT, fixed = false } = {}) {
+  return new Promise((resolve, reject) => {
+    const attempt = n => {
+      const ctx = { port: n, token: crypto.randomBytes(24).toString('hex'), lastBeat: 0 };
+      const server = createServer(ctx);
+      server.once('error', async err => {
+        if (err.code !== 'EADDRINUSE') return reject(err);
+        if (await ping(n)) return resolve({ existing: `http://${HOST}:${n}` });
+        if (fixed || n >= port + 20) return reject(Object.assign(new Error(`Port ${n} is in use by another program. Pick another with --port.`), { code: 'EADDRINUSE' }));
+        attempt(n + 1);
+      });
+      server.listen(n, HOST, () => resolve({ server, ctx, address: `http://${HOST}:${n}` }));
+    };
+    attempt(port);
+  });
+}
+
+async function main(argv) {
+  const code = require('./lib/cli').run(argv);
+  if (code !== null) process.exit(code);
+
+  const flag = argv.indexOf('--port');
+  const wanted = flag !== -1 ? argv[flag + 1] : process.env.AGENTDECK_PORT;
+  const port = wanted == null || wanted === '' ? DEFAULT_PORT : Number(wanted);
+  if (!Number.isInteger(port) || port < 1 || port > 65535) { console.error(`"${wanted}" is not a valid port (1-65535).`); process.exit(2); }
+  const mode = argv.includes('--no-open') ? 'none' : argv.includes('--browser') ? 'tab' : 'window';
+
+  let started;
+  try { started = await start({ port, fixed: wanted != null && wanted !== '' }); }
+  catch (e) { console.error(e.message); process.exit(1); }
+
+  const address = started.existing || started.address;
+  if (started.existing) console.log(`AgentDeck is already running at ${address}. Opening it.`);
+  else console.log(`AgentDeck ${core.VERSION} running at ${address}  (Ctrl+C to stop)`);
+
+  if (mode === 'none') return;
+  const done = () => process.exit(0);
+  if (mode === 'window' && openWindow(address, started.existing ? done : done)) return;
+  if (mode === 'window') console.log('No Chrome, Edge, Brave or Chromium was found for a standalone window, so AgentDeck opened in your default browser. Close the tab to stop it.');
+  openTab(address);
+  if (started.existing) return done();
+  // Opened as a browser tab with nobody watching the console: stop once the page has gone.
+  if (mode === 'window') {
+    setInterval(() => { if (started.ctx.lastBeat && Date.now() - started.ctx.lastBeat > 120000) process.exit(0); }, 30000).unref();
+  }
+}
+
+if (require.main === module) main(process.argv.slice(2));
+
+module.exports = { start, routes, DEFAULT_PORT };
