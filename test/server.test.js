@@ -54,7 +54,11 @@ function call(port, method, url, { headers = {}, body } = {}) {
   await testAsync('API: bodies are validated and errors carry the right status', async () => {
     assert.strictEqual((await call(port, 'POST', '/api/profile/preview', { headers: auth, body: '{nope' })).status, 400);
     for (const body of ['[]', 'null', '"x"', '7']) assert.strictEqual((await call(port, 'POST', '/api/profile/preview', { headers: auth, body })).status, 400, body);
-    assert.strictEqual((await call(port, 'POST', '/api/profile/preview', { headers: auth, body: 'x'.repeat(6e6) })).status, 413);
+    // The server answers 413 as soon as the limit is passed. A client still uploading may
+    // see that reply or, on some platforms, a reset connection; both mean "refused".
+    const big = await call(port, 'POST', '/api/profile/preview', { headers: auth, body: 'x'.repeat(6e6) }).catch(e => ({ refused: /ECONNRESET|EPIPE/.test(e.code || e.message) }));
+    assert(big.status === 413 || big.refused, JSON.stringify(big));
+    assert.strictEqual((await call(port, 'GET', '/api/ping')).status, 200);
     assert.strictEqual((await call(port, 'GET', '/api/profile?harness=nope', { headers: auth })).status, 400);
     assert.strictEqual((await call(port, 'GET', '/api/profile?harness=claude&project=' + encodeURIComponent(home.p('elsewhere')), { headers: auth })).status, 403);
     assert.strictEqual((await call(port, 'POST', '/api/backups/restore', { headers: auth, body: { id: 'nope' } })).status, 404);
