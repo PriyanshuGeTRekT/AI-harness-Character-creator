@@ -1,6 +1,27 @@
-# AgentDeck
+<h1 align="center">AgentDeck</h1>
 
-**One control panel for every AI coding agent on your machine.**
+<p align="center"><b>One control panel for every AI coding agent on your machine.</b><br>
+A local GUI to configure Claude Code, OpenAI Codex CLI, Gemini CLI, Cursor, OpenCode and 16 more: behavior, permissions, token usage and cost, skills, subagents, MCP servers and hooks.</p>
+
+<p align="center">
+  <a href="https://github.com/PriyanshuGeTRekT/AI-harness-Character-creator/stargazers"><img alt="GitHub stars" src="https://img.shields.io/github/stars/PriyanshuGeTRekT/AI-harness-Character-creator?style=flat&logo=github&color=c2410c"></a>
+  <a href="https://github.com/PriyanshuGeTRekT/AI-harness-Character-creator/network/members"><img alt="Forks" src="https://img.shields.io/github/forks/PriyanshuGeTRekT/AI-harness-Character-creator?style=flat&color=c2410c"></a>
+  <a href="https://github.com/PriyanshuGeTRekT/AI-harness-Character-creator/releases"><img alt="Downloads" src="https://img.shields.io/github/downloads/PriyanshuGeTRekT/AI-harness-Character-creator/total?label=downloads&color=c2410c"></a>
+  <img alt="Views" src="https://hits.sh/github.com/PriyanshuGeTRekT/AI-harness-Character-creator.svg?label=views&color=c2410c">
+  <a href="https://github.com/PriyanshuGeTRekT/AI-harness-Character-creator/actions/workflows/ci.yml"><img alt="CI" src="https://img.shields.io/github/actions/workflow/status/PriyanshuGeTRekT/AI-harness-Character-creator/ci.yml?branch=main&label=tests"></a>
+  <img alt="Supported agents" src="https://img.shields.io/badge/agents-21-c2410c">
+  <img alt="Dependencies" src="https://img.shields.io/badge/dependencies-0-brightgreen">
+  <img alt="Node" src="https://img.shields.io/badge/node-%E2%89%A518-339933?logo=node.js&logoColor=white">
+  <a href="LICENSE"><img alt="License" src="https://img.shields.io/github/license/PriyanshuGeTRekT/AI-harness-Character-creator?color=blue"></a>
+</p>
+
+<p align="center">
+  <a href="#install">Install</a> ·
+  <a href="#what-you-get">Features</a> ·
+  <a href="#supported-harnesses">Supported agents</a> ·
+  <a href="#faq">FAQ</a> ·
+  <a href="CONTRIBUTING.md">Contributing</a>
+</p>
 
 You run Claude Code, Codex, Gemini CLI, Cursor. Each keeps its behavior in a different file, in a different format, in a different folder. AgentDeck finds them all and gives you one window to tune how they talk, what they are allowed to do, what they cost, and whether they agree with each other.
 
@@ -128,6 +149,38 @@ It only writes into project folders a harness has already worked in, or ones you
 AgentDeck is a local web server bound to `127.0.0.1`. Each run generates a random session key that every request must carry. The key is handed only to the window AgentDeck opens (and kept in a file only your user can read, so a second launch can reopen a running copy); it is never served over HTTP, so another user on the same machine cannot fetch it. The `Host` header is checked to stop DNS-rebinding, and a content security policy blocks anything not served by the app itself. It makes no network requests.
 
 MCP secrets you enter are stored where the harness expects them, in plain text, which is how those tools work; the health check flags them. The destructive-command hook recipe is a safety net against mistakes, not a sandbox: keep your harness's own sandbox and approval settings on.
+
+## FAQ
+
+**Is there a GUI for Claude Code settings?**
+Yes, that is what this is. AgentDeck edits `~/.claude/settings.json`, `CLAUDE.md`, subagents, skills, slash commands, MCP servers, hooks and permission rules from one window, and covers 20 other tools as far as each one's config allows (see the table above).
+
+**How do I reduce Claude Code or Codex token usage?**
+Use the *Token saver* or *Caveman* preset on the Behavior tab to shorten replies, lower the reasoning effort and shell-output cap on the Settings tab, and remove MCP servers you do not use (each one adds its tool list to every request). The Usage tab shows what you actually spent, per model and per project.
+
+**How do I stop Claude Code asking for permission all the time?**
+Open Settings and add the *Safe dev loop* rule set: read-only git, listing files, tests and lint run without a prompt, while secrets and destructive commands stay blocked.
+
+**How do I keep `CLAUDE.md`, `AGENTS.md` and `GEMINI.md` in sync?**
+Apply one profile to several harnesses at once, then use the Sync view to see where they have drifted and make them match again.
+
+**Can I share one skill or MCP server across Claude Code, Codex, Cursor and Gemini CLI?**
+Yes. Create it once and tick the other harnesses; each gets the file in its own location and format.
+
+**How do I see how much Claude Code costs me?**
+Run `agentdeck usage`, or open the Usage view: cost and tokens by day, model and project, read from the transcripts already on your disk.
+
+**Does it send my code or config anywhere?**
+No. It is a local server on `127.0.0.1` with no network requests and no telemetry.
+
+**Does it work on Windows, macOS and Linux?**
+Yes. The test suite runs on all three, on Node 18 to 24.
+
+## Star history
+
+If AgentDeck saves you time, a star helps other people find it.
+
+[![Star history](https://api.star-history.com/svg?repos=PriyanshuGeTRekT/AI-harness-Character-creator&type=Date)](https://star-history.com/#PriyanshuGeTRekT/AI-harness-Character-creator&Date)
 
 ## Uninstall
 
