@@ -5,7 +5,7 @@
 You run Claude Code, Codex, Gemini CLI, Cursor. Each keeps its behavior in a different file, in a different format, in a different folder. AgentDeck finds them all and gives you one window to tune how they talk, what they are allowed to do, what they cost, and whether they agree with each other.
 
 ```bash
-npx github:PriyanshuGeTRekT/agentdeck
+npx github:PriyanshuGeTRekT/AI-harness-Character-creator
 ```
 
 Local only. Zero dependencies. Every change is shown as a diff first and can be undone.
@@ -35,14 +35,14 @@ Local only. Zero dependencies. Every change is shown as a diff first and can be 
 You need [Node.js](https://nodejs.org) 18 or later. Nothing else.
 
 ```bash
-npx github:PriyanshuGeTRekT/agentdeck
+npx github:PriyanshuGeTRekT/AI-harness-Character-creator
 ```
 
 or from a clone:
 
 ```bash
-git clone https://github.com/PriyanshuGeTRekT/agentdeck.git
-cd agentdeck
+git clone https://github.com/PriyanshuGeTRekT/AI-harness-Character-creator.git
+cd AI-harness-Character-creator
 node server.js
 ```
 
